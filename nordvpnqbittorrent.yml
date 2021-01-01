@@ -1,0 +1,48 @@
+version: "2"
+
+services:
+  nordvpn:
+    image: bubuntux/nordvpn:3.7.4
+    container_name: nordvpn
+    #network_mode: bridge                        # Required
+    networks:
+      - web
+    cap_add:
+      - NET_ADMIN                               # Required
+      - SYS_MODULE                              # Required for TECHNOLOGY=NordLynx
+    devices:
+      - /dev/net/tun                            # Required
+    environment:                                # Review https://github.com/bubuntux/nordvpn#environment-variables
+      - USER=justinaugustejohnson@gmail.com     # Required
+      - PASS=ec7xfvkhj58jg3xdjf                 # Required
+      - CONNECT=United_States
+      - TECHNOLOGY=NordLynx
+      - NETWORK=192.168.1.0/24 
+    restart: always
+    ports:
+      - 8081:8081
+
+  qbittorrent:
+    image: linuxserver/qbittorrent:4.2.0201911300248-6791-7e0d642ubuntu18.04.1-ls14
+    container_name: qbittorrent
+    network_mode: service:nordvpn
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Vancouver
+      - UMASK_SET=022
+      - WEBUI_PORT=8081
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/qbittorrent:/config
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+      - /srv/dev-disk-by-label-Storage/Torrents/incomplete:/incomplete
+      - /srv/dev-disk-by-label-Storage/Torrents/torrent-files:/torrent-files
+    restart: always
+    depends_on:
+      - nordvpn
+    labels:
+      - traefik.enable=true
+      - traefik.frontend.headers.customResponseHeaders=X-Robots-Tag(`noindex,nofollow,nosnippet,noarchive,notranslate,noimageindex`)
+      - traefik.frontend.redirect.entryPoint=https
+      - traefik.frontend.rule=Host(`qbittorrent.itsyellow.house`)
+      - traefik.port=8081

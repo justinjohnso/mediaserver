@@ -1,0 +1,282 @@
+version: "2"
+
+networks:
+  web:
+    external:
+      name: web
+    
+services:
+  traefik:
+    image: traefik
+    restart: always
+    container_name: traefik
+    ports:
+      - 80:80 # <== http
+      - 443:443 # <== https
+      - 8080:8080
+    command:
+      #- --api.insecure=true # <== Enabling insecure api, NOT RECOMMENDED FOR PRODUCTION
+      - --api.dashboard=true # <== Enabling the dashboard to view services, middlewares, routers, etc...
+      - --api.debug=true # <== Enabling additional endpoints for debugging and profiling
+      - --log.level=DEBUG # <== Setting the level of the logs from traefik
+      - --providers.docker=true # <== Enabling docker as the provider for traefik
+      - --providers.docker.exposedbydefault=false # <== Don't expose every container to traefik, only expose enabled ones
+      - --providers.file.filename=/dynamic.yaml # <== Referring to a dynamic configuration file
+      - --providers.docker.network=web # <== Operate on the docker network named web
+      - --entrypoints.web.address=:80 # <== Defining an entrypoint for port :80 named web
+      #- --metrics
+      #- --metrics.prometheus.buckets=0.1,0.3,1.2,5.0
+      #- --accesslog
+      #- --tracing
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # <== Volume for docker admin
+      - /srv/dev-disk-by-label-Storage/.config/traefik/dynamic.yaml:/dynamic.yaml # <== Volume for dynamic conf file, **ref: line 27
+    networks:
+      - web # <== Placing traefik on the network named web, to access containers on this network
+    labels:
+      - traefik.enable=true # <== Enable traefik on itself to view dashboard and assign subdomain to view it
+      - traefik.http.routers.api.rule=Host(`traefik.itsyellow.house`) # <== Setting the domain for the dashboard
+      - traefik.http.routers.api.service=api@internal # <== Enabling the api to be a service to access
+      
+  cloudflare-ddns:
+    image: oznu/cloudflare-ddns:latest
+    container_name: cloudflare-ddns
+    restart: always
+    environment:
+      - API_KEY=4rRI3VP8EeI0u_waqWQLhTD4nJtjPEZdI08I4CAa
+      - ZONE=itsyellow.house
+      - PROXIED=true
+    networks:
+      - web
+      
+  glances:
+    image: nicolargo/glances:latest
+    container_name: glances
+    restart: always
+    pid: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - GLANCES_OPT=-w
+    networks:
+      - web
+    ports:
+      - 61208:61208
+      - 61209:61209
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.glances.rule=Host(`glances.itsyellow.house`)
+      - traefik.frontend.rule=Host(`glances.docker.localhost`)
+      - traefik.frontend.headers.customResponseHeaders=X-Robots-Tag(`noindex,nofollow,nosnippet,noarchive,notranslate,noimageindex`)
+      - traefik.frontend.redirect.entryPoint=https
+      - traefik.port=61208
+      
+  justflix:
+    image: linuxserver/jellyfin:latest
+    container_name: justflix
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+      - UMASK_SET=022 #optional
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/jellyfin:/config
+      - /srv/dev-disk-by-label-Storage/Media/TV:/data/tvshows
+      - /srv/dev-disk-by-label-Storage/Media/Movies:/data/movies
+      - /srv/dev-disk-by-label-Storage/Media/Music:/data/music
+    devices:
+      # RPi
+      # - /dev/vchiq:/dev/vchiq
+      # VAAPI Devices
+      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/dri/card0:/dev/dri/card0
+    restart: unless-stopped
+    ports:
+      - 8096:8096
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.justflix.entryPoints=web
+      - traefik.frontend.headers.customResponseHeaders=X-Robots-Tag(`noindex,nofollow,nosnippet,noarchive,notranslate,noimageindex`)
+      #- traefik.frontend.redirect.entryPoint=https
+      - traefik.http.routers.justflix.rule=Host(`justflix.itsyellow.house`)
+      #- traefik.frontend.rule=Host(`justflix.docker.localhost`)
+      #- traefik.port=8096
+  
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Vancouver
+      - UMASK_SET=022 #optional
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/radarr:/config
+      - /srv/dev-disk-by-label-Storage/Media/Movies:/movies
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+    restart: unless-stopped
+    networks:
+      - web
+    ports:
+      - 7878:7878
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.radarr.rule=Host(`radarr.itsyellow.house`)
+      - traefik.http.routers.radarr.entrypoints=web
+      - traefik.port=7878
+
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Vancouver
+      - UMASK_SET=022 #optional
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/sonarr:/config
+      - /srv/dev-disk-by-label-Storage/Media/TV:/tv
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+    restart: unless-stopped
+    networks:
+      - web
+    ports:
+      - 8989:8989
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.sonarr.rule=Host(`sonarr.itsyellow.house`)
+      - traefik.http.routers.sonarr.entrypoints=web
+      - traefik.port=8989
+
+  lidarr:
+    image: linuxserver/lidarr
+    container_name: lidarr
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+      - UMASK_SET=022 #optional
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/lidarr:/config
+      - /srv/dev-disk-by-label-Storage/Media/Music:/music
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+    restart: unless-stopped
+    ports:
+      - 8686:8686
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.lidarr.rule=Host(`lidarr.itsyellow.house`)
+      - traefik.http.routers.lidarr.entrypoints=web
+      - traefik.port=8686
+      
+  calibre-web:
+    image: linuxserver/calibre-web
+    container_name: calibre-web
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+      - UMASK_SET=022 #optional
+      - DOCKER_MODS=linuxserver/calibre-web:calibre
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/calibre-web:/config
+      - /srv/dev-disk-by-label-Storage/Media/Books:/books
+    restart: unless-stopped
+    ports:
+      - 8083:8083
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.calibre.rule=Host(`calibre.itsyellow.house`)
+      - traefik.http.routers.calibre.entrypoints=web
+      - traefik.port=8083
+      
+  calibredb:
+    image: jakbutler/docker-calibredb
+    container_name: calibredb
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+      #- UMASK_SET=022 #optional
+      - AUTO_UPDATE="1"
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/calibredb:/opt/calibredb/config
+      - /srv/dev-disk-by-label-Storage/Media/Books:/opt/calibredb/library
+      - /srv/dev-disk-by-label-Storage/Torrents/completed/Books:/opt/calibredb/import
+    restart: unless-stopped  
+      
+  lazylibrarian:
+    image: linuxserver/lazylibrarian
+    container_name: lazylibrarian
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+      #- UMASK_SET=022 #optional
+      - DOCKER_MODS=linuxserver/calibre-web:calibre|linuxserver/mods:lazylibrarian-ffmpeg #optional
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/lazylibrarian:/config
+      - /srv/dev-disk-by-label-Storage/.config/calibredb:/calibredb
+      - /srv/dev-disk-by-label-Storage/Media/Books:/books
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+    restart: unless-stopped
+    ports:
+      - 5299:5299
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.lazylibrarian.rule=Host(`lazylibrarian.itsyellow.house`)
+      - traefik.http.routers.lazylibrarian.entrypoints=web
+      - traefik.port=5299
+
+  bazarr:
+    image: linuxserver/bazarr
+    container_name: bazarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/Vancouver
+      - UMASK_SET=022 #optional
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/bazarr:/config
+      - /srv/dev-disk-by-label-Storage/Media/Movies:/movies
+      - /srv/dev-disk-by-label-Storage/Media/TV:/tv
+    ports:
+      - 6767:6767
+    networks:
+      - web
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.bazarr.rule=Host(`bazarr.itsyellow.house`)
+      - traefik.http.routers.bazarr.entrypoints=web
+      - traefik.port=6767
+
+  jackett:
+    image: linuxserver/jackett
+    container_name: jackett
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+      - AUTO_UPDATE=true #optional
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/jackett:/config
+      - /srv/dev-disk-by-label-Storage/Torrents/completed/:/downloads
+    restart: unless-stopped
+    ports:
+      - 9117:9117
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.jackett.rule=Host(`jackett.itsyellow.house`)
+      - traefik.http.routers.jackett.entrypoints=web
+      - traefik.port=9117

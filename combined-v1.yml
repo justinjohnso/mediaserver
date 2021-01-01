@@ -1,0 +1,439 @@
+version: "2"
+
+######### Variables ##########
+# mediaserver_config_dir: /srv/dev-disk-by-label-Storage/.config
+# mediaserver_torrents_dir: /srv/dev-disk-by-label-Storage/Torrents
+# mediaserver_media_dir: /srv/dev-disk-by-label-Storage/Media
+# cloudflare_email: justin@jjohnson.io
+# cloudflare_api_key: 4rRI3VP8EeI0u_waqWQLhTD4nJtjPEZdI08I4CAa
+# external_domainname: itsyellow.house
+# internal_domainname: itsyellow.house
+# docker_user_uid: 998
+# docker_user_gid: 100
+# timezone: America/Vancouver
+# default_labels:
+#   - "traefik.docker.network=traefik-public"
+#   - "traefik.frontend.headers.SSLRedirect=true"
+#   - "traefik.frontend.headers.STSSeconds=315360000"
+#   - "traefik.frontend.headers.browserXSSFilter=true"
+#   - "traefik.frontend.headers.contentTypeNosniff=true"
+#   - "traefik.frontend.headers.forceSTSHeader=true"
+#   - "traefik.frontend.headers.SSLHost=itsyellow.house"
+#   - "traefik.frontend.headers.STSIncludeSubdomains=true"
+#   - "traefik.frontend.headers.STSPreload=true"
+#   - "traefik.frontend.headers.frameDeny=true"
+
+######### Networks ##########
+networks:
+  vpn:
+    external:
+      name: vpn
+  
+  traefik-public:
+    external:
+      name: traefik-public
+  
+  default:
+    driver: bridge
+
+  # net:
+  #   external: false
+  #   attachable: true
+
+services:
+######### Frontends ##########
+  cloudflare-ddns:
+    image: oznu/cloudflare-ddns:latest
+    container_name: cloudflare-ddns
+    restart: always
+    environment:
+      - API_KEY=4rRI3VP8EeI0u_waqWQLhTD4nJtjPEZdI08I4CAa
+      - ZONE=itsyellow.house
+      - PROXIED=true
+    networks:
+      - traefik-public
+
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: always
+    domainname: itsyellow.house
+    networks:
+      - default
+      - traefik-public
+    ports:
+      - 80:80 # <== http
+      - 443:443 # <== https
+      - 8080:8080
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+      - CLOUDFLARE_EMAIL=justin@jjohnson.io
+      - CLOUDFLARE_API_KEY=4rRI3VP8EeI0u_waqWQLhTD4nJtjPEZdI08I4CAa
+      - CF_API_EMAIL=justin@jjohnson.io
+      - CF_API_KEY=4rRI3VP8EeI0u_waqWQLhTD4nJtjPEZdI08I4CAa
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Docker admin
+      # - /srv/dev-disk-by-label-Storage/.config/traefik:/etc/traefik
+      # - /srv/dev-disk-by-label-Storage/.config/shared:/shared
+      # - /srv/dev-disk-by-label-Storage/.config/traefik/certs:/certs
+      - /srv/dev-disk-by-label-Storage/.config/traefik/dynamic.yaml:/dynamic.yaml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.backend=traefik"
+      # - "traefik.frontend.rule=Host:traefik.itsyellow.house,traefik.itsyellow.house"
+      - "traefik.frontend.rule=Host:traefik.itsyellow.house"
+      - "traefik.port=8080"      
+      - "traefik.docker.network=traefik-public"
+      - "traefik.frontend.headers.SSLRedirect=true"
+      - "traefik.frontend.headers.STSSeconds=315360000"
+      - "traefik.frontend.headers.browserXSSFilter=true"
+      - "traefik.frontend.headers.contentTypeNosniff=true"
+      - "traefik.frontend.headers.forceSTSHeader=true"
+      - "traefik.frontend.headers.SSLHost=itsyellow.house"
+      - "traefik.frontend.headers.STSIncludeSubdomains=true"
+      - "traefik.frontend.headers.STSPreload=true"
+      - "traefik.frontend.headers.frameDeny=true"
+
+  heimdall:
+    image: linuxserver/heimdall
+    container_name: heimdall
+    restart: unless-stopped
+    networks:
+      - traefik-public
+    ports:
+      - 8075:8075
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/heimdall:/config
+      - /srv/dev-disk-by-label-Storage/.config/shared:/shared
+    labels:
+      - "traefik.enable=true"
+      - "traefik.backend=heimdall"
+      - "traefik.frontend.rule=Host:heimdall.itsyellow.house,itsyellow.house"
+      # - "traefik.frontend.auth.basic.usersFile=/shared/.htpasswd"
+      # - "traefik.port=80"
+      - "traefik.port=443"
+      - "traefik.protocol=https"      
+      - "traefik.docker.network=traefik-public"
+      - "traefik.frontend.headers.SSLRedirect=true"
+      - "traefik.frontend.headers.STSSeconds=315360000"
+      - "traefik.frontend.headers.browserXSSFilter=true"
+      - "traefik.frontend.headers.contentTypeNosniff=true"
+      - "traefik.frontend.headers.forceSTSHeader=true"
+      - "traefik.frontend.headers.SSLHost=itsyellow.house"
+      - "traefik.frontend.headers.STSIncludeSubdomains=true"
+      - "traefik.frontend.headers.STSPreload=true"
+      - "traefik.frontend.headers.frameDeny=true"
+
+######### Monitoring ##########
+  glances:
+    image: nicolargo/glances:latest
+    container_name: glances
+    restart: always
+    networks:
+      - traefik-public
+    ports:
+      - 61208:61208
+      - 61209:61209
+    pid: host
+    environment:
+      - GLANCES_OPT=-w
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - "traefik.enable=true"
+      - "traefik.backend=glances"
+      - "traefik.frontend.rule=Host:glances.itsyellow.house,itsyellow.house"
+      - "traefik.port=61208"
+      - "traefik.protocol=https"      
+      - "traefik.docker.network=traefik-public"
+      - "traefik.frontend.headers.SSLRedirect=true"
+      - "traefik.frontend.headers.STSSeconds=315360000"
+      - "traefik.frontend.headers.browserXSSFilter=true"
+      - "traefik.frontend.headers.contentTypeNosniff=true"
+      - "traefik.frontend.headers.forceSTSHeader=true"
+      - "traefik.frontend.headers.SSLHost=itsyellow.house"
+      - "traefik.frontend.headers.STSIncludeSubdomains=true"
+      - "traefik.frontend.headers.STSPreload=true"
+      - "traefik.frontend.headers.frameDeny=true"
+
+######### Torrenting ##########
+  nordvpn:
+    image: bubuntux/nordvpn:3.7.4
+    container_name: nordvpn
+    restart: unless-stopped
+    # network_mode: bridge                        # Required
+    cap_add:
+      - NET_ADMIN                               # Required
+      - SYS_MODULE                              # Required for TECHNOLOGY=NordLynx
+    devices:
+      - /dev/net/tun                            # Required
+    networks:
+      - vpn
+    ports:
+      - 8081:8081 # qBittorrent
+    environment:                                # Review https://github.com/bubuntux/nordvpn#environment-variables
+      - USER=justinaugustejohnson@gmail.com     # Required
+      - PASS=ec7xfvkhj58jg3xdjf                 # Required
+      - CONNECT=United_States
+      - TECHNOLOGY=NordLynx
+      - NETWORK=192.168.1.0/24
+
+  qbittorrent:
+    image: linuxserver/qbittorrent:4.2.0201911300248-6791-7e0d642ubuntu18.04.1-ls14
+    container_name: qbittorrent
+    restart: always
+    depends_on:
+      - nordvpn
+    networks:
+      - traefik-public
+      - vpn
+    # network_mode: service:nordvpn
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+      - UMASK_SET=022
+      - WEBUI_PORT=8081
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/qbittorrent:/config
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+      - /srv/dev-disk-by-label-Storage/Torrents/incomplete:/incomplete
+      - /srv/dev-disk-by-label-Storage/Torrents/torrent-files:/torrent-files
+    labels:
+      - "traefik.enable=true"
+      - "traefik.backend=qbittorrent"
+      - "traefik.frontend.rule=Host:transmission.itsyellow.house"
+      - "traefik.port=8081"      
+      - "traefik.docker.network=traefik-public"
+      - "traefik.frontend.headers.SSLRedirect=true"
+      - "traefik.frontend.headers.STSSeconds=315360000"
+      - "traefik.frontend.headers.browserXSSFilter=true"
+      - "traefik.frontend.headers.contentTypeNosniff=true"
+      - "traefik.frontend.headers.forceSTSHeader=true"
+      - "traefik.frontend.headers.SSLHost=itsyellow.house"
+      - "traefik.frontend.headers.STSIncludeSubdomains=true"
+      - "traefik.frontend.headers.STSPreload=true"
+      - "traefik.frontend.headers.frameDeny=true"
+
+######### Watching ##########
+  jellyfin:
+    image: linuxserver/jellyfin:latest
+    container_name: jellyfin 
+    restart: unless-stopped
+    networks:
+      - traefik-public
+    ports:
+      - 8096:8096
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+    volumes:
+      - /srv/dev-disk-by-label-Storage/.config/jellyfin:/config
+      - /srv/dev-disk-by-label-Storage/Media/TV:/data/tvshows
+      - /srv/dev-disk-by-label-Storage/Media/Movies:/data/movies
+      - /srv/dev-disk-by-label-Storage/Media/Music:/data/music
+    devices:
+      # RPi
+      # - /dev/vchiq:/dev/vchiq
+      # VAAPI Devices
+      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/dri/card0:/dev/dri/card0
+    labels:
+      - "traefik.enable=true"
+      - "traefik.backend=jellyfin"
+      - "traefik.frontend.rule=Host:justflix.itsyellow.house"
+      - "traefik.port=8096"      
+      - "traefik.docker.network=traefik-public"
+      - "traefik.frontend.headers.SSLRedirect=true"
+      - "traefik.frontend.headers.STSSeconds=315360000"
+      - "traefik.frontend.headers.browserXSSFilter=true"
+      - "traefik.frontend.headers.contentTypeNosniff=true"
+      - "traefik.frontend.headers.forceSTSHeader=true"
+      - "traefik.frontend.headers.SSLHost=itsyellow.house"
+      - "traefik.frontend.headers.STSIncludeSubdomains=true"
+      - "traefik.frontend.headers.STSPreload=true"
+      - "traefik.frontend.headers.frameDeny=true"
+
+######### Media Management ##########
+  radarr:
+    image: "linuxserver/radarr"
+    container_name: "radarr"
+    restart: unless-stopped
+    depends_on:
+      - qbittorrent
+    networks:
+      - traefik-public
+    ports:
+      - 7878:7878
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+    volumes:
+      - "/etc/localtime:/etc/localtime:ro"
+      - /srv/dev-disk-by-label-Storage/.config/radarr:/config
+      - /srv/dev-disk-by-label-Storage/Media/Movies:/movies
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+    labels:
+      - "traefik.enable=true"
+      - "traefik.backend=radarr"
+      - "traefik.frontend.rule=Host:radarr.itsyellow.house"
+      - "traefik.port=7878"      
+      - "traefik.docker.network=traefik-public"
+      - "traefik.frontend.headers.SSLRedirect=true"
+      - "traefik.frontend.headers.STSSeconds=315360000"
+      - "traefik.frontend.headers.browserXSSFilter=true"
+      - "traefik.frontend.headers.contentTypeNosniff=true"
+      - "traefik.frontend.headers.forceSTSHeader=true"
+      - "traefik.frontend.headers.SSLHost=itsyellow.house"
+      - "traefik.frontend.headers.STSIncludeSubdomains=true"
+      - "traefik.frontend.headers.STSPreload=true"
+      - "traefik.frontend.headers.frameDeny=true"
+  
+  sonarr:
+    image: "linuxserver/sonarr"
+    hostname: sonarr
+    container_name: "sonarr"
+    restart: unless-stopped
+    depends_on:
+      - qbittorrent
+    networks:
+      - traefik-public
+    ports:
+      - 8989:8989
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+    volumes:
+      - "/etc/localtime:/etc/localtime:ro"
+      - /srv/dev-disk-by-label-Storage/.config/sonarr:/config
+      - /srv/dev-disk-by-label-Storage/Media/TV:/tv
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+    labels:
+      - "traefik.enable=true"
+      - "traefik.backend=sonarr"
+      - "traefik.frontend.rule=Host:sonarr.itsyellow.house"
+      - "traefik.port=8989"      
+      - "traefik.docker.network=traefik-public"
+      - "traefik.frontend.headers.SSLRedirect=true"
+      - "traefik.frontend.headers.STSSeconds=315360000"
+      - "traefik.frontend.headers.browserXSSFilter=true"
+      - "traefik.frontend.headers.contentTypeNosniff=true"
+      - "traefik.frontend.headers.forceSTSHeader=true"
+      - "traefik.frontend.headers.SSLHost=itsyellow.house"
+      - "traefik.frontend.headers.STSIncludeSubdomains=true"
+      - "traefik.frontend.headers.STSPreload=true"
+      - "traefik.frontend.headers.frameDeny=true"
+
+  lidarr:
+    image: "linuxserver/lidarr"
+    hostname: lidarr
+    container_name: "lidarr"
+    restart: unless-stopped
+    depends_on:
+      - qbittorrent
+    networks:
+      - traefik-public
+    ports:
+      - 8686:8686
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+    volumes:
+      - "/etc/localtime:/etc/localtime:ro"
+      - /srv/dev-disk-by-label-Storage/.config/lidarr:/config
+      - /srv/dev-disk-by-label-Storage/Media/Music:/music
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+    labels:
+      - "traefik.enable=true"
+      - "traefik.backend=lidarr"
+      - "traefik.frontend.rule=Host:lidarr.itsyellow.house"
+      - "traefik.port=8686"      
+      - "traefik.docker.network=traefik-public"
+      - "traefik.frontend.headers.SSLRedirect=true"
+      - "traefik.frontend.headers.STSSeconds=315360000"
+      - "traefik.frontend.headers.browserXSSFilter=true"
+      - "traefik.frontend.headers.contentTypeNosniff=true"
+      - "traefik.frontend.headers.forceSTSHeader=true"
+      - "traefik.frontend.headers.SSLHost=itsyellow.house"
+      - "traefik.frontend.headers.STSIncludeSubdomains=true"
+      - "traefik.frontend.headers.STSPreload=true"
+      - "traefik.frontend.headers.frameDeny=true"
+
+######### Indexing & Search ##########
+  bazarr:
+    image: "linuxserver/bazarr"
+    hostname: bazarr
+    container_name: "bazarr"
+    restart: unless-stopped
+    networks:
+      - traefik-public
+    ports:
+      - 6767:6767
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+    volumes:
+      - "/etc/localtime:/etc/localtime:ro"
+      - /srv/dev-disk-by-label-Storage/.config/bazarr:/config
+      - /srv/dev-disk-by-label-Storage/Media/Movies:/movies
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+    labels:
+      - "traefik.enable=true"
+      - "traefik.backend=bazarr"
+      - "traefik.frontend.rule=Host:bazarr.itsyellow.house"
+      - "traefik.port=6767"      
+      - "traefik.docker.network=traefik-public"
+      - "traefik.frontend.headers.SSLRedirect=true"
+      - "traefik.frontend.headers.STSSeconds=315360000"
+      - "traefik.frontend.headers.browserXSSFilter=true"
+      - "traefik.frontend.headers.contentTypeNosniff=true"
+      - "traefik.frontend.headers.forceSTSHeader=true"
+      - "traefik.frontend.headers.SSLHost=itsyellow.house"
+      - "traefik.frontend.headers.STSIncludeSubdomains=true"
+      - "traefik.frontend.headers.STSPreload=true"
+      - "traefik.frontend.headers.frameDeny=true"
+
+  jackett:
+    image: "linuxserver/jackett"
+    hostname: jackett
+    container_name: "jackett"
+    restart: unless-stopped
+    networks:
+      - traefik-public
+    ports:
+      - 9117:9117
+    environment:
+      - PUID=998
+      - PGID=100
+      - TZ=America/Vancouver
+      - AUTO_UPDATE=true #optional
+    volumes:
+      - "/etc/localtime:/etc/localtime:ro"
+      - /srv/dev-disk-by-label-Storage/.config/jackett:/config
+      - /srv/dev-disk-by-label-Storage/Torrents/completed:/downloads
+    labels:
+      - "traefik.enable=true"
+      - "traefik.backend=jackett"
+      - "traefik.frontend.rule=Host:jackett.itsyellow.house"
+      - "traefik.port=9117"      
+      - "traefik.docker.network=traefik-public"
+      - "traefik.frontend.headers.SSLRedirect=true"
+      - "traefik.frontend.headers.STSSeconds=315360000"
+      - "traefik.frontend.headers.browserXSSFilter=true"
+      - "traefik.frontend.headers.contentTypeNosniff=true"
+      - "traefik.frontend.headers.forceSTSHeader=true"
+      - "traefik.frontend.headers.SSLHost=itsyellow.house"
+      - "traefik.frontend.headers.STSIncludeSubdomains=true"
+      - "traefik.frontend.headers.STSPreload=true"
+      - "traefik.frontend.headers.frameDeny=true"
